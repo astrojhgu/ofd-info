@@ -345,12 +345,35 @@ $('#file').addEventListener('change', async e => {
   try{ await addFiles(e.target.files); }catch(err){ setStatus('加载失败：'+(err&&err.message||err), true); }
   e.target.value='';
 });
-let depth = 0;
-window.addEventListener('dragenter', e => { e.preventDefault(); depth++; $('#drop').classList.add('show'); });
-window.addEventListener('dragover', e => e.preventDefault());
-window.addEventListener('dragleave', e => { e.preventDefault(); if(--depth<=0){ depth=0; $('#drop').classList.remove('show'); } });
-window.addEventListener('drop', async e => { e.preventDefault(); depth=0; $('#drop').classList.remove('show');
-  if (e.dataTransfer.files.length){ try{ await addFiles(e.dataTransfer.files); }catch(err){ setStatus('加载失败：'+(err&&err.message||err), true);} } });
+// --- 拖放 / 拖拽上传（挂在 document 上，事件冒泡，只触发一次）---
+const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files');
+let dragCounter = 0;
+document.addEventListener('dragenter', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragCounter++;
+  $('#drop').classList.add('show');
+});
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('dragleave', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  if (--dragCounter <= 0){ dragCounter = 0; $('#drop').classList.remove('show'); }
+});
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  dragCounter = 0;
+  $('#drop').classList.remove('show');
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length){
+    try{ await addFiles(files); }
+    catch(err){ setStatus('加载失败：'+(err&&err.message||err), true); }
+  }
+});
 $('#copyAll').addEventListener('click', ()=>copyActive('text'));
 $('#dlJson').addEventListener('click', ()=>{
   const a=state.activeIdx>=0?state.docs[state.activeIdx]:null; if(!a) return;
