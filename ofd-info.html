@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OFD 信息提取 · 民航电子行程单</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --line:#e4e6ea; --txt:#1f2530; --dim:#6b7280;
+    --accent:#2563eb; --ok:#16a34a; --bad:#dc2626;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--txt);
+    font:14px/1.6 "Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;}
+  header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+    padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .brand{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px}
+  .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--accent);display:inline-block}
+  .btn{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:7px 14px;
+    border-radius:8px;cursor:pointer;font-size:13px}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .spacer{flex:1}
+  #filestrip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-top:6px}
+  .chip{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);
+    border-radius:20px;padding:3px 8px 3px 12px;font-size:12px;color:var(--dim);cursor:pointer}
+  .chip .name{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip.active{border-color:var(--accent);color:var(--accent)}
+  .chip .x{border:0;background:transparent;color:var(--dim);cursor:pointer;font-size:14px;
+    line-height:1;padding:2px 5px;border-radius:50%}
+  .chip .x:hover{color:var(--bad)}
+  main{padding:18px;display:flex;flex-direction:column;align-items:center;gap:18px}
+  .card{width:min(860px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+  .card>.head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);
+    background:#fafbfc;font-size:13px;flex-wrap:wrap}
+  .card>.head .fname{font-weight:700;font-size:14px}
+  .card>.head .badge{background:#dbeafe;color:#1d4ed8;border-radius:5px;padding:0 7px;font-size:12px}
+  .sec{border-top:1px solid var(--line)}
+  .sec:first-of-type{border-top:0}
+  .sec>.t{font-weight:600;font-size:13px;color:var(--accent);padding:10px 16px 2px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0 20px;padding:0 16px 12px}
+  .grid .row{display:flex;justify-content:space-between;gap:14px;border-bottom:1px dashed #eef0f3;
+    padding:6px 0;font-size:13px}
+  .grid .k{color:var(--dim);white-space:nowrap}
+  .grid .v{text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}
+  .flat{padding:0 16px 12px}
+  .flat .row{display:flex;gap:10px;padding:5px 0;border-bottom:1px dashed #eef0f3;font-size:13px}
+  .flat .k{color:var(--dim);white-space:nowrap;min-width:110px}
+  .check{font-size:12.5px;color:var(--dim);margin:2px 16px 14px}
+  .check.ok{color:var(--ok)} .check.bad{color:var(--bad)}
+  .raw{max-height:0;overflow:hidden;transition:max-height .25s ease}
+  .raw.open{max-height:2000px}
+  details{border-top:1px solid var(--line)}
+  summary{cursor:pointer;padding:9px 16px;font-size:13px;color:var(--dim);list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary:hover{color:var(--txt)}
+  .raw pre{margin:0;padding:0 16px 16px;font-size:12px;line-height:1.5;color:var(--dim);
+    white-space:pre-wrap;word-break:break-all}
+  #statusbar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+    padding:7px 16px;font-size:12px;color:var(--dim);z-index:20}
+  #statusbar .err{color:var(--bad)}
+  #drop{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.5);border:3px dashed var(--accent);color:#fff;font-size:20px;pointer-events:none}
+  #drop.show{display:flex}
+  .empty{color:var(--dim);text-align:center;padding:56px 20px;font-size:15px;border:2px dashed var(--line);
+    border-radius:12px;width:min(720px,100%);background:var(--panel)}
+  .empty b{color:var(--txt)}
+  @media print{header,#statusbar,.head .btn,details{display:none!important} main{padding:0}
+    .card{border:0;box-shadow:none} body{background:#fff}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="dot"></span>OFD 信息提取 · 民航电子行程单</div>
+  <label class="btn primary" for="file">＋ 选择 OFD 文件…</label>
+  <input id="file" type="file" accept=".ofd,application/octet-stream" multiple hidden>
+  <div class="spacer"></div>
+  <button class="btn" id="copyAll">复制当前信息</button>
+  <button class="btn" id="dlJson">下载当前 JSON</button>
+  <div id="filestrip"></div>
+</header>
+
+<div id="drop">松开鼠标即可读取 OFD 文件（文件不上传，本地解析）</div>
+<main id="main">
+  <div class="empty" id="empty">
+    <div style="font-size:34px;margin-bottom:10px">🛫</div>
+    <b>把 OFD 文件拖到这里</b>，或点击“选择 OFD 文件”。<br>
+    自动提取发票号码、旅客、航段、金额、购买方等关键信息，无需渲染成版式。
+  </div>
+</main>
+<div id="statusbar"><span id="stMsg">未加载文件。提示：需新版 Chrome / Edge / Firefox / Safari。</span></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const setStatus = (m, err) => { const s = $('#stMsg'); s.textContent = m; s.className = err ? 'err' : ''; };
+const dec = new TextDecoder();
+
+const parseXML = str => { const d = new DOMParser().parseFromString(str, 'application/xml');
+  if (d.getElementsByTagName('parsererror').length) throw new Error('XML 解析失败'); return d; };
+const kids = (n, name) => Array.from(n.children || []).filter(c => c.localName === name);
+const attr = (n, name) => n ? n.getAttribute(name) : null;
+function childText(n, name){ for (const c of (n.children||[])) if (c.localName === name) return (c.textContent||'').trim(); return null; }
+function resolvePath(baseDir, rel){
+  if (!rel) return null;
+  const parts = baseDir ? baseDir.split('/') : [];
+  for (const p of String(rel).split('/')){
+    if (!p || p === '.') continue;
+    if (p === '..') parts.pop(); else parts.push(p);
+  }
+  return parts.join('/');
+}
+
+/* ---------- zip ---------- */
+const inflateRaw = async u8 => {
+  const ds = new DecompressionStream('deflate-raw');
+  const buf = await new Response(new Blob([u8]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(buf);
+};
+async function readZip(arrayBuffer){
+  const dv = new DataView(arrayBuffer), u8 = new Uint8Array(arrayBuffer);
+  const bytes = arrayBuffer.byteLength;
+  let eocd = -1;
+  for (let i = bytes - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  if (eocd < 0) throw new Error('不是有效的 OFD/zip 文件（找不到中央目录）');
+  const total = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const entries = new Map();
+  for (let n = 0; n < total; n++){
+    if (dv.getUint32(off, true) !== 0x02014b50) throw new Error('zip 中央目录损坏');
+    const method = dv.getUint16(off + 10, true), flags = dv.getUint16(off + 8, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true), extraLen = dv.getUint16(off + 30, true), cmtLen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    entries.set(dec.decode(u8.subarray(off + 46, off + 46 + nameLen)), { method, csize, lho });
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  const out = new Map();
+  for (const [name, e] of entries){
+    const nLen = dv.getUint16(e.lho + 26, true), xLen = dv.getUint16(e.lho + 28, true);
+    const start = e.lho + 30 + nLen + xLen;
+    const data = u8.subarray(start, start + e.csize);
+    if (e.method === 0) out.set(name, data);
+    else if (e.method === 8) out.set(name, await inflateRaw(data));
+    else throw new Error('不支持的压缩方式 ' + e.method + '（' + name + '）');
+  }
+  return out;
+}
+const zipText = (zip, p) => { const b = zip.get(p); return b ? dec.decode(b) : null; };
+
+/* ---------- OFD 解析（只取结构化信息） ---------- */
+const XBRL_LABELS = {
+  PassengerName:'旅客姓名', ValidIdNumber:'有效身份证件号码', Endorsement:'签注',
+  NumberOfGpOrder:'GP 单号', ElectronicInvoiceAirTransportReceiptNumber:'发票号码',
+  QrCode:'二维码内容', DepartureStation:'出发地', DestinationStation:'到达地',
+  FlightSegment:'航段序号', Carrier:'承运人', Flight:'航班号', Class:'座位等级',
+  CarrierDate:'乘机日期', DepartureTime:'起飞时间', FareBasis:'客票级别(票价基础)',
+  FreeBaggageAllowance:'免费行李额', Fare:'票价', FuelSurcharge:'燃油附加费',
+  VatRate:'增值税税率', VatTaxAmount:'增值税税额', CivilAviationDevelopmentFund:'民航发展基金',
+  OtherTaxes:'其他税费', TotalAmount:'合计金额(含税)', ETicketNumber:'电子客票号码',
+  VerificationCode:'验证码', PromptInformation:'提示信息', Insurance:'保险费',
+  AgentCode:'销售网点代号', IssueParty:'填开单位', IssueDate:'填开日期',
+  IssuingStatus:'开票状态', MarkingOfDomesticOrInternational:'国内/国际',
+  NameOfPurchaser:'购买方名称', NameOfSeller:'销售方名称',
+  UnifiedSocialCreditCodeOfPurchaser:'购买方统一社会信用代码',
+};
+// 分类展示顺序
+const SECTIONS = [
+  ['票据信息', ['ElectronicInvoiceAirTransportReceiptNumber','IssuingStatus','IssueDate','IssueParty','AgentCode','VerificationCode','NumberOfGpOrder','ETicketNumber','MarkingOfDomesticOrInternational','PromptInformation','Insurance','Endorsement']],
+  ['旅客信息', ['PassengerName','ValidIdNumber','FreeBaggageAllowance']],
+  ['航段信息', ['FlightSegment','DepartureStation','DestinationStation','Carrier','Flight','Class','CarrierDate','DepartureTime','FareBasis']],
+  ['金额明细', ['Fare','FuelSurcharge','VatRate','VatTaxAmount','CivilAviationDevelopmentFund','OtherTaxes','TotalAmount']],
+  ['收付款方', ['NameOfPurchaser','UnifiedSocialCreditCodeOfPurchaser','NameOfSeller']],
+];
+const SEEN = new Set();
+function xbrlFields(str){
+  const xml = parseXML(str), fields = [], root = xml.documentElement;
+  const walk = n => {
+    for (const c of (n.children || [])){
+      const ln = c.localName;
+      if (['context','entity','period','identifier','unit','measure','instant','schemaRef'].includes(ln)) continue;
+      const hasChild = Array.from(c.children||[]).some(ch => ch.nodeType === 1);
+      if (!hasChild && ln !== 'xbrl'){
+        const v = (c.textContent || '').trim();
+        if (v) fields.push({ key: ln, label: XBRL_LABELS[ln] || ln, value: v });
+      } else walk(c);
+    }
+  };
+  walk(root);
+  return fields;
+}
+// 兜底：无 XBRL 时，抽取版面文本（页面 text 内容）
+function pageTexts(xmlStr){
+  const xml = parseXML(xmlStr); const out = [];
+  for (const tc of xml.getElementsByTagNameNS('*','TextCode')) out.push((tc.textContent||'').trim());
+  return out.filter(Boolean);
+}
+
+async function parseOFD(arrayBuffer){
+  const zip = await readZip(arrayBuffer);
+  const rootTxt = zipText(zip, 'OFD.xml');
+  if (!rootTxt) throw new Error('缺少 OFD.xml');
+  const root = parseXML(rootTxt);
+  const att = []; const texts = [];
+  for (const [p, b] of zip){
+    const base = p.split('/').pop() || '';
+    if (/^atr_.*\.xml$/i.test(base)) att.push(xbrlFields(dec.decode(b)));
+    if (/Pages\/.*\/Content\.xml$/i.test(p)){
+      for (const t of pageTexts(dec.decode(b))) texts.push(t);
+    }
+  }
+  return { fields: att[0] || [], texts };
+}
+
+/* ---------- 应用逻辑 ---------- */
+const state = { docs: [], activeIdx: -1 };
+function amountCheck(f){
+  const num = k => { const it = f.find(x => x.key === k); return it ? parseFloat(it.value) : NaN; };
+  const fare=num('Fare'), fuel=num('FuelSurcharge'), vat=num('VatTaxAmount'),
+        caf=num('CivilAviationDevelopmentFund'), other=num('OtherTaxes'), total=num('TotalAmount');
+  if (![fare,fuel,vat,caf,other,total].every(Number.isFinite)) return null;
+  const sum = fare+fuel+vat+caf+other, diff = Math.abs(sum-total);
+  return { fare, fuel, vat, caf, other, total, sum, ok: diff < 0.01, diff };
+}
+function summary(f){
+  const by = k => { const it = f.find(x=>x.key===k); return it?it.value:null; };
+  const no=by('ElectronicInvoiceAirTransportReceiptNumber'), pax=by('PassengerName'),
+        total=by('TotalAmount'), route=[by('DepartureStation'),by('DestinationStation')].filter(Boolean).join('→'),
+        fl=by('Flight'), dt=by('CarrierDate'), buyer=by('NameOfPurchaser');
+  return [no&&('发票号 '+no), pax&&('旅客 '+pax), total&&('合计 ¥'+total), (route||fl)&&(route+ (fl?' '+fl:'')), dt&&dt, buyer].filter(Boolean).join(' · ');
+}
+function makeCard(d){
+  const card = el('div','card'), head = el('div','head');
+  head.append(el('span','fname', d.name));
+  head.append(el('span','badge', d.fields.length ? '已识别' : '无结构化数据'));
+  head.append(el('span','', summary(d.fields)));
+  const spacer = el('div'); spacer.style.flex='1'; head.append(spacer);
+  card.append(head);
+  if (d.fields.length){
+    const SORTED = d.fields.map(x=>x.key);
+    const placed = new Set();
+    let secIdx = 0;
+    for (const [title, keys] of SECTIONS){
+      const rows = keys.filter(k => SORTED.includes(k) && !placed.has(k));
+      if (!rows.length) continue;
+      const sec = el('div','sec'); sec.append(el('div','t', title));
+      const grid = el('div','grid');
+      for (const k of rows){
+        const hits = d.fields.filter(x => x.key === k); placed.add(k);
+        const row = el('div','row');
+        row.append(el('span','k', hits[0].label));
+        const v = el('span','v', hits.map(x => x.value).join('；'));
+        if (['Fare','FuelSurcharge','VatTaxAmount','CivilAviationDevelopmentFund','OtherTaxes','TotalAmount','Insurance'].includes(k)) v.classList.add('money');
+        row.append(v);
+        grid.append(row);
+      }
+      sec.append(grid); secIdx++;
+      card.append(sec);
+    }
+    const extra = d.fields.filter(x => !placed.has(x.key));
+    if (extra.length){
+      const sec = el('div','sec'); sec.append(el('div','t','其他'));
+      const flat = el('div','flat');
+      for (const x of extra){ const r = el('div','row'); r.append(el('span','k',x.label)); r.append(el('span','v',x.value)); flat.append(r); }
+      sec.append(flat); card.append(sec);
+    }
+    const chk = amountCheck(d.fields);
+    if (chk){
+      card.append(el('div','check ' + (chk.ok?'ok':'bad'),
+        chk.ok
+        ? '金额自检 ✓ : 票价 '+chk.fare.toFixed(2)+' + 燃油 '+chk.fuel.toFixed(2)+' + 增值税 '+chk.vat.toFixed(2)
+          +' + 民航基金 '+chk.caf.toFixed(2)+' + 其他 '+chk.other.toFixed(2)+' = 合计 '+chk.total.toFixed(2)
+        : '⚠ 金额不一致：分项合计 '+chk.sum.toFixed(2)+' ≠ 合计 '+chk.total.toFixed(2)+'（差 '+chk.diff.toFixed(2)+'）'));
+    }
+  } else {
+    const sec = el('div','sec'); sec.append(el('div','t','版面文本（未检测到结构化 XBRL 附件）'));
+    const flat = el('div','flat');
+    for (const t of d.texts.slice(0, 200)){ const r = el('div','row', t); flat.append(r); }
+    sec.append(flat); card.append(sec);
+  }
+  const det = el('details');
+  const sum2 = el('summary','', '原始字段（全部键值）');
+  const pre = el('pre','', d.fields.length ? d.fields.map(x => x.key + ' = ' + x.value).join('\n')
+                                          : (d.texts.join('\n') || '（空）'));
+  det.append(sum2); det.append(pre);
+  card.append(det);
+  return card;
+}
+
+async function addFiles(fileList){
+  for (const f of Array.from(fileList)){
+    try {
+      const d = await parseOFD(await f.arrayBuffer());
+      d.name = f.name;
+      state.docs.push(d);
+    } catch(err){
+      setStatus('读取失败：' + f.name + ' — ' + (err && err.message || err), true);
+    }
+  }
+  await renderAll();
+}
+async function renderAll(){
+  const main = $('#main');
+  main.innerHTML = '';
+  for (let i = 0; i < state.docs.length; i++){
+    main.append(makeCard(state.docs[i]));
+  }
+  if (!state.docs.length){ const d = el('div','empty'); d.id='empty';
+    d.innerHTML = '<div style="font-size:34px;margin-bottom:10px">🛫</div><b>把 OFD 文件拖到这里</b>，或点击“选择 OFD 文件”。<br>自动提取发票号码、旅客、航段、金额、购买方等关键信息，无需渲染成版式。';
+    main.append(d); }
+  state.activeIdx = state.docs.length - 1;
+  rebuildStrip();
+  updateStatus();
+  window.__dbgDocs = state.docs;
+}
+function rebuildStrip(){
+  const s = $('#filestrip'); s.innerHTML = '';
+  state.docs.forEach((d,i)=>{
+    const chip = el('div','chip'+(i===state.activeIdx?' active':''));
+    chip.append(el('span','name',d.name));
+    const x = el('button','x','✕');
+    x.addEventListener('click', async ev => { ev.stopPropagation(); state.docs.splice(i,1); await renderAll(); });
+    chip.append(x);
+    chip.addEventListener('click', ()=>{ const card=document.querySelectorAll('.card')[i]; card?.scrollIntoView({behavior:'smooth',block:'start'}); state.activeIdx=i; rebuildStrip(); });
+    s.append(chip);
+  });
+}
+function updateStatus(){
+  const n = state.docs.length;
+  const a = state.activeIdx>=0?state.docs[state.activeIdx]:null;
+  setStatus(n ? (a ? ('已读取 '+n+' 个文件 · 当前：'+a.name+' · '+summary(a.fields)) : ('已读取 '+n+' 个文件')) : '未加载文件。');
+}
+function copyActive(mode){
+  const a = state.activeIdx>=0?state.docs[state.activeIdx]:null; if(!a) return;
+  const text = a.fields.length ? a.fields.map(x=>x.label+'\t'+x.value).join('\n') : a.texts.join('\n');
+  navigator.clipboard.writeText(mode==='json' ? JSON.stringify(Object.fromEntries(a.fields.map(x=>[x.key,x.value])), null, 2) : text)
+    .then(()=>setStatus('已复制到剪贴板')).catch(()=>setStatus('复制失败', true));
+}
+$('#file').addEventListener('change', async e => {
+  try{ await addFiles(e.target.files); }catch(err){ setStatus('加载失败：'+(err&&err.message||err), true); }
+  e.target.value='';
+});
+let depth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); depth++; $('#drop').classList.add('show'); });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('dragleave', e => { e.preventDefault(); if(--depth<=0){ depth=0; $('#drop').classList.remove('show'); } });
+window.addEventListener('drop', async e => { e.preventDefault(); depth=0; $('#drop').classList.remove('show');
+  if (e.dataTransfer.files.length){ try{ await addFiles(e.dataTransfer.files); }catch(err){ setStatus('加载失败：'+(err&&err.message||err), true);} } });
+$('#copyAll').addEventListener('click', ()=>copyActive('text'));
+$('#dlJson').addEventListener('click', ()=>{
+  const a=state.activeIdx>=0?state.docs[state.activeIdx]:null; if(!a) return;
+  const blob=new Blob([JSON.stringify(Object.fromEntries(a.fields.map(x=>[x.key,x.value])),null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const el2=el('a'); el2.href=url;
+  el2.download=(a.name.replace(/\.ofd$/i,'')||'invoice')+'.json'; el2.click(); URL.revokeObjectURL(url);
+});
+if (!('DecompressionStream' in window)) setStatus('当前浏览器不支持 DecompressionStream，无法解压 OFD。请用新版浏览器。', true);
+</script>
+</body>
+</html>
